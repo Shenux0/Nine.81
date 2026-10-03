@@ -52,12 +52,6 @@ export function EquationPanel({ mode, lastJump }) {
           {lastJump.matches ? "Formula and engine agree — that's real physics, not a scripted animation." : "Mismatch — check the physics setup."}
         </p>
       )}
-
-      {mode === "game" && lastJump?.guessCorrect != null && (
-        <p style={{ marginTop: 6, fontSize: 16, fontWeight: 700, color: lastJump.guessCorrect ? COLORS.success : COLORS.accent }}>
-          {lastJump.guessCorrect ? "Your prediction was correct!" : "Your prediction was wrong."}
-        </p>
-      )}
     </div>
   );
 }

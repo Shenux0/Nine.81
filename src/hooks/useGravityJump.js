@@ -16,8 +16,7 @@ export function useGravityJump({
   minChargeVelocity = 3,
   maxChargeVelocity = 10,
   chargeTimeMs = 1500,
-  targetHeight = null,
-  guess = null,
+  targetBand = null,
 }) {
   const bodyRef = useRef();
   const grounded = useRef(true);
@@ -40,9 +39,9 @@ export function useGravityJump({
       body.setLinvel({ x: 0, y: velocity, z: 0 }, true);
       grounded.current = false;
       setIsAirborne(true);
-      launchMeta.current = { velocity, targetHeight, guess };
+      launchMeta.current = { velocity, targetBand };
     },
-    [targetHeight, guess]
+    [targetBand]
   );
 
   const handlePressStart = useCallback(() => {
@@ -86,26 +85,24 @@ export function useGravityJump({
 
     const meta = launchMeta.current || {};
     const velocity = meta.velocity ?? fixedVelocity;
-    const jumpTargetHeight = meta.targetHeight ?? null;
-    const jumpGuess = meta.guess ?? null;
+    const jumpTargetBand = meta.targetBand ?? null;
 
     const measuredHeight = Math.max(0, peakY.current - startY.current);
     const predictedHeight = (velocity * velocity) / (2 * g);
     const tolerance = Math.max(0.05, predictedHeight * 0.03);
     const matches = Math.abs(measuredHeight - predictedHeight) <= tolerance;
-    const guessCorrect =
-      jumpGuess == null
+    const hit =
+      jumpTargetBand == null
         ? null
-        : (jumpGuess === "clear") === (measuredHeight >= (jumpTargetHeight ?? 0));
+        : measuredHeight >= jumpTargetBand.min && measuredHeight <= jumpTargetBand.max;
 
     const result = {
       velocity,
       measuredHeight,
       predictedHeight,
       matches,
-      targetHeight: jumpTargetHeight,
-      guess: jumpGuess,
-      guessCorrect,
+      targetBand: jumpTargetBand,
+      hit,
     };
     setLastJump(result);
     return result;

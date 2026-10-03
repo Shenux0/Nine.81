@@ -3,13 +3,19 @@ import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { RigidBody } from "@react-three/rapier";
 import { useGravityJump } from "../hooks/useGravityJump";
+import { COLORS } from "../theme";
 
 // Both components read geometry/materials from the SAME .glb that gltfjsx
 // converted (see PlaceholderScene.jsx for the raw auto-generated version).
 // This file is the hand-written integration layer on top of that output.
 
+// moon.glb is a ~1-unit-radius sphere with two materials (surface + crater
+// floor), so it loads as a group rather than a single mesh — render the whole
+// scene. Scaled to the placeholder's radius of 4 so its top sits at y = 0.
+const MOON_RADIUS = 4;
+
 export function Planet(props) {
-  const { nodes, materials } = useGLTF("/placeholder-scene.glb");
+  const { scene } = useGLTF("/models/moon.glb");
   const ref = useRef();
 
   useFrame((_, delta) => {
@@ -17,11 +23,11 @@ export function Planet(props) {
   });
 
   return (
-    <mesh
+    <primitive
       ref={ref}
-      geometry={nodes.Planet_Placeholder.geometry}
-      material={materials.Planet_Placeholder_mat}
-      position={[0, -4, 0]}
+      object={scene}
+      scale={MOON_RADIUS}
+      position={[0, -MOON_RADIUS, 0]}
       {...props}
     />
   );
@@ -34,8 +40,7 @@ export function Astronaut({
   minChargeVelocity,
   maxChargeVelocity,
   chargeTimeMs,
-  targetHeight,
-  guess,
+  targetBand,
   pressSignal,
   releaseSignal,
   onLanded,
@@ -60,8 +65,7 @@ export function Astronaut({
     minChargeVelocity,
     maxChargeVelocity,
     chargeTimeMs,
-    targetHeight,
-    guess,
+    targetBand,
   });
 
   useEffect(() => {
@@ -103,14 +107,28 @@ export function Astronaut({
   );
 }
 
-export function TargetMarker({ height, groundY = 0, visible = true }) {
-  if (!visible || height == null) return null;
+export function TargetMarker({ band, groundY = 0, visible = true }) {
+  if (!visible || band == null) return null;
+  const { min, max } = band;
+  const height = Math.max(max - min, 0.02);
+  const centerY = groundY + (min + max) / 2;
   return (
-    <mesh position={[0, groundY + height, 0]}>
-      <boxGeometry args={[2, 0.05, 2]} />
-      <meshBasicMaterial color="#E8632D" transparent opacity={0.6} />
-    </mesh>
+    <group>
+      <mesh position={[0, centerY, 0]}>
+        <boxGeometry args={[2, height, 2]} />
+        <meshBasicMaterial color={COLORS.accent} transparent opacity={0.25} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, groundY + min, 0]}>
+        <boxGeometry args={[2, 0.05, 2]} />
+        <meshBasicMaterial color={COLORS.accent} transparent opacity={0.8} />
+      </mesh>
+      <mesh position={[0, groundY + max, 0]}>
+        <boxGeometry args={[2, 0.05, 2]} />
+        <meshBasicMaterial color={COLORS.accent} transparent opacity={0.8} />
+      </mesh>
+    </group>
   );
 }
 
 useGLTF.preload("/placeholder-scene.glb");
+useGLTF.preload("/models/moon.glb");

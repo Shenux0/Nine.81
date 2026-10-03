@@ -7,7 +7,7 @@ const WORLD_FACTS = {
 };
 
 const GAME_COPY =
-  "Hold SPACE to charge your jump, then commit to a guess — will you clear the target line above the astronaut? Release to find out.";
+  "Hold SPACE to charge your jump, then release — land your peak height inside the glowing band to keep your streak alive. Each hit narrows the band; a miss resets it.";
 
 export function WorldInfoPanel({ mode, world }) {
   return (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useReducer, useCallback } from "react";
+import * as THREE from "three";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { PerspectiveCamera } from "@react-three/drei";
 import { Physics, RigidBody, CuboidCollider } from "@react-three/rapier";
@@ -11,51 +12,127 @@ import { ChargeMeter } from "./components/ChargeMeter";
 import { ComparisonStrip } from "./components/ComparisonStrip";
 import { WORLDS, WORLD_COLORS, COLORS } from "./theme";
 
-const FIXED_VELOCITY = 6;
+// Roughly a strong human jump. Gravity stays real per world, so heights still scale
+// exactly with 1/g (Earth ≈ 0.62 m, Moon ≈ 3.78 m, Jupiter ≈ 0.25 m) — but the Moon
+// jump stays low enough that the camera doesn't have to retreat far to frame it.
+const FIXED_VELOCITY = 3.5;
 const MIN_CHARGE_VELOCITY = 3;
 const MAX_CHARGE_VELOCITY = 10;
 const CHARGE_TIME_MS = 1500;
 const ASTRONAUT_REST_Y = 0; // world y where the astronaut's RigidBody rests (ground level)
 
+const IDLE_FOCUS_HEIGHT = 1.6; // comfortable close-up height when nothing's charging
+const CAMERA_BASE_FOV = 45; // never zoom in tighter than the original default
+const CAMERA_MAX_FOV = 95; // widen (rather than only retreat) to fit very tall bands, e.g. the Moon
+const CAMERA_MIN_DISTANCE = 4;
+const CAMERA_MAX_DISTANCE = 20;
+const CAMERA_GROUND_MARGIN = 1.4; // keeps the planet/ground anchored at the bottom of frame
+const CAMERA_PADDING = 1.15; // extra headroom above the focus height
+const CAMERA_DISTANCE_GROWTH = 0.3; // how much distance grows per meter of framed height
+const CAMERA_DAMPING = 4; // higher = snappier follow
+
 function jumpHeight(v, g) {
   return (v * v) / (2 * g);
 }
 
-function randomTargetHeight(g) {
-  const lo = 0.6 * jumpHeight(MIN_CHARGE_VELOCITY, g);
-  const hi = 0.95 * jumpHeight(MAX_CHARGE_VELOCITY, g);
-  return lo + Math.random() * Math.max(0, hi - lo);
+const BASE_WIDTH_FRACTION = 0.35;
+const MIN_WIDTH_FRACTION = 0.08;
+const WIDTH_DECAY = 0.8;
+
+function generateBand(g, streak) {
+  const reachableLo = jumpHeight(MIN_CHARGE_VELOCITY, g);
+  const reachableHi = jumpHeight(MAX_CHARGE_VELOCITY, g);
+  const range = reachableHi - reachableLo;
+  const playLo = 0.6 * reachableLo;
+  const playHi = 0.95 * reachableHi;
+  const baseWidth = BASE_WIDTH_FRACTION * range;
+  const minWidth = MIN_WIDTH_FRACTION * range;
+  const width = Math.min(
+    minWidth + (baseWidth - minWidth) * Math.pow(WIDTH_DECAY, streak),
+    (playHi - playLo) * 0.9 // defensive clamp, shouldn't bind
+  );
+  const half = width / 2;
+  const centerLo = playLo + half;
+  const centerHi = playHi - half;
+  const center =
+    centerHi > centerLo ? centerLo + Math.random() * (centerHi - centerLo) : (playLo + playHi) / 2;
+  return { min: center - half, max: center + half };
 }
 
-function CameraRig({ target }) {
+function CameraRig({ focusHeight, groundY = 0 }) {
   const { camera } = useThree();
-  useFrame(() => {
-    camera.lookAt(...target);
+  const lookAt = useRef(new THREE.Vector3(0, 0.6, 0));
+
+  useFrame((_, delta) => {
+    // Total vertical extent we need in frame: ground margin + the focus height, with headroom.
+    const totalHeight = (focusHeight + CAMERA_GROUND_MARGIN) * CAMERA_PADDING;
+
+    // Distance grows with height (up to a cap) — beyond that, widen the FOV instead of
+    // retreating forever, so tall Moon bands don't need an absurd camera distance.
+    const desiredDistance = THREE.MathUtils.clamp(
+      CAMERA_MIN_DISTANCE + totalHeight * CAMERA_DISTANCE_GROWTH,
+      CAMERA_MIN_DISTANCE,
+      CAMERA_MAX_DISTANCE
+    );
+    const requiredFovDeg = THREE.MathUtils.radToDeg(Math.atan(totalHeight / 2 / desiredDistance)) * 2;
+    const desiredFov = THREE.MathUtils.clamp(requiredFovDeg, CAMERA_BASE_FOV, CAMERA_MAX_FOV);
+
+    // Anchor the BOTTOM of the frame at the ground/planet (not the midpoint of the range) —
+    // this is what keeps the planet visible even when the top of a tall band gets clipped.
+    const desiredHalfHeight = desiredDistance * Math.tan(THREE.MathUtils.degToRad(desiredFov) / 2);
+    const desiredCenterY = groundY - CAMERA_GROUND_MARGIN + desiredHalfHeight;
+
+    // eslint-disable-next-line react/immutability -- imperative Three.js camera API, not React state
+    camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, CAMERA_DAMPING, delta);
+    camera.updateProjectionMatrix();
+
+    camera.position.set(
+      THREE.MathUtils.damp(camera.position.x, 0, CAMERA_DAMPING, delta),
+      THREE.MathUtils.damp(camera.position.y, groundY + 1, CAMERA_DAMPING, delta),
+      THREE.MathUtils.damp(camera.position.z, desiredDistance, CAMERA_DAMPING, delta)
+    );
+
+    lookAt.current.set(
+      THREE.MathUtils.damp(lookAt.current.x, 0, CAMERA_DAMPING, delta),
+      THREE.MathUtils.damp(lookAt.current.y, desiredCenterY, CAMERA_DAMPING, delta),
+      THREE.MathUtils.damp(lookAt.current.z, 0, CAMERA_DAMPING, delta)
+    );
+    camera.lookAt(lookAt.current);
   });
+
   return null;
 }
 
 const initialGameState = {
   phase: "idle", // idle | charging | airborne
   chargeLevel: 0,
-  targetHeight: null,
-  guess: null,
+  targetBand: null, // { min, max } | null
+  streak: 0,
+  bestStreak: 0,
+  lastHit: null, // true | false | null
 };
 
 function gameReducer(state, action) {
   switch (action.type) {
     case "CHARGE_START":
-      return { ...state, phase: "charging", chargeLevel: 0, targetHeight: action.targetHeight, guess: null };
+      return { ...state, phase: "charging", chargeLevel: 0 };
     case "CHARGE_TICK":
       return state.phase === "charging" ? { ...state, chargeLevel: action.level } : state;
-    case "GUESS":
-      return { ...state, guess: action.guess };
     case "LAUNCH":
       return { ...state, phase: "airborne" };
-    case "LAND":
-      return { ...state, phase: "idle" };
+    case "LAND": {
+      const nextStreak = action.hit ? state.streak + 1 : 0;
+      return {
+        ...state,
+        phase: "idle",
+        lastHit: action.hit,
+        streak: nextStreak,
+        bestStreak: Math.max(state.bestStreak, nextStreak),
+        targetBand: generateBand(action.g, nextStreak),
+      };
+    }
     case "RESET_TO_IDLE":
-      return initialGameState;
+      return { ...initialGameState, targetBand: action.targetBand ?? null };
     default:
       return state;
   }
@@ -75,6 +152,13 @@ export default function App() {
   const wasAirborne = useRef(false);
 
   const g = WORLDS[world];
+
+  const focusHeight =
+    mode === "learn"
+      ? jumpHeight(FIXED_VELOCITY, g)
+      : gameState.phase === "idle"
+        ? IDLE_FOCUS_HEIGHT
+        : jumpHeight(MAX_CHARGE_VELOCITY, g);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -103,23 +187,23 @@ export default function App() {
   // World/mode switches remount Physics (via key={world}) or otherwise invalidate
   // any in-flight charge/jump — keep the game phase machine in sync.
   useEffect(() => {
-    dispatchGame({ type: "RESET_TO_IDLE" });
+    dispatchGame({ type: "RESET_TO_IDLE", targetBand: mode === "game" ? generateBand(g, 0) : null });
     wasCharging.current = false;
     wasAirborne.current = false;
-  }, [world, mode]);
+  }, [world, mode, g]);
 
   const handleChargeChange = useCallback(
     ({ isCharging, chargeLevel }) => {
       if (mode === "game") {
         if (isCharging && !wasCharging.current) {
-          dispatchGame({ type: "CHARGE_START", targetHeight: randomTargetHeight(g) });
+          dispatchGame({ type: "CHARGE_START" });
         } else if (isCharging) {
           dispatchGame({ type: "CHARGE_TICK", level: chargeLevel });
         }
       }
       wasCharging.current = isCharging;
     },
-    [mode, g]
+    [mode]
   );
 
   const handleAirborneChange = useCallback(
@@ -141,15 +225,11 @@ export default function App() {
           [world]: { last: result.measuredHeight, best: Math.max(prev[world]?.best ?? 0, result.measuredHeight) },
         }));
       } else {
-        dispatchGame({ type: "LAND" });
+        dispatchGame({ type: "LAND", hit: result.hit, g });
       }
     },
-    [mode, world]
+    [mode, world, g]
   );
-
-  const handleGuess = useCallback((guess) => {
-    dispatchGame({ type: "GUESS", guess });
-  }, []);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", background: COLORS.background, overflow: "hidden" }}>
@@ -206,16 +286,18 @@ export default function App() {
         <ChargeMeter
           level={gameState.chargeLevel}
           visible
-          isCharging={gameState.phase === "charging"}
+          phase={gameState.phase}
           accentColor={COLORS.accent}
-          guess={gameState.guess}
-          onGuess={handleGuess}
+          streak={gameState.streak}
+          bestStreak={gameState.bestStreak}
+          lastHit={gameState.lastHit}
+          band={gameState.targetBand}
         />
       )}
 
       <Canvas>
         <PerspectiveCamera makeDefault position={[0, 1, 5]} fov={45} />
-        <CameraRig target={[0, 0.6, 0]} />
+        <CameraRig focusHeight={focusHeight} groundY={ASTRONAUT_REST_Y} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[5, 8, 5]} intensity={1.3} />
 
@@ -228,8 +310,7 @@ export default function App() {
             minChargeVelocity={MIN_CHARGE_VELOCITY}
             maxChargeVelocity={MAX_CHARGE_VELOCITY}
             chargeTimeMs={CHARGE_TIME_MS}
-            targetHeight={gameState.targetHeight}
-            guess={gameState.guess}
+            targetBand={gameState.targetBand}
             pressSignal={pressTick}
             releaseSignal={releaseTick}
             onLanded={handleLanded}
@@ -238,7 +319,7 @@ export default function App() {
           />
           {mode === "game" && (
             <TargetMarker
-              height={gameState.targetHeight}
+              band={gameState.targetBand}
               groundY={ASTRONAUT_REST_Y}
               visible={gameState.phase !== "idle"}
             />

@@ -1,4 +1,10 @@
-export function ChargeMeter({ level, visible, isCharging, accentColor, guess, onGuess }) {
+import { COLORS } from "../theme";
+
+function fmt(n) {
+  return n.toFixed(2);
+}
+
+export function ChargeMeter({ level, visible, phase, accentColor, streak, bestStreak, lastHit, band }) {
   if (!visible) return null;
 
   return (
@@ -15,6 +21,30 @@ export function ChargeMeter({ level, visible, isCharging, accentColor, guess, on
         gap: 10,
       }}
     >
+      <p style={{ margin: 0, color: "white", fontFamily: "system-ui, sans-serif", fontSize: 14, fontWeight: 700 }}>
+        Streak: {streak} · Best: {bestStreak}
+      </p>
+
+      {phase !== "idle" && band && (
+        <p style={{ margin: 0, color: "#C9D3E0", fontFamily: "system-ui, sans-serif", fontSize: 13 }}>
+          Land between {fmt(band.min)}m – {fmt(band.max)}m
+        </p>
+      )}
+
+      {phase === "idle" && lastHit != null && (
+        <p
+          style={{
+            margin: 0,
+            fontFamily: "system-ui, sans-serif",
+            fontSize: 14,
+            fontWeight: 700,
+            color: lastHit ? COLORS.success : COLORS.accent,
+          }}
+        >
+          {lastHit ? "Hit! Band narrows." : "Missed — streak reset."}
+        </p>
+      )}
+
       <div
         style={{
           width: 220,
@@ -34,41 +64,6 @@ export function ChargeMeter({ level, visible, isCharging, accentColor, guess, on
           }}
         />
       </div>
-
-      {isCharging && (
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => onGuess("clear")}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 14,
-              border: guess === "clear" ? `2px solid ${accentColor}` : "1px solid #2A3A5C",
-              background: "#1B2436",
-              color: "white",
-              fontFamily: "system-ui, sans-serif",
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            Will clear it
-          </button>
-          <button
-            onClick={() => onGuess("miss")}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 14,
-              border: guess === "miss" ? `2px solid ${accentColor}` : "1px solid #2A3A5C",
-              background: "#1B2436",
-              color: "white",
-              fontFamily: "system-ui, sans-serif",
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            Won't clear it
-          </button>
-        </div>
-      )}
 
       <p style={{ margin: 0, color: "#C9D3E0", fontFamily: "system-ui, sans-serif", fontSize: 12, opacity: 0.75 }}>
         Hold SPACE to charge, release to jump
