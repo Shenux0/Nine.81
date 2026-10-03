@@ -10,8 +10,19 @@ export const WORLD_COLORS = {
   Jupiter: "#E8632D",
 };
 
+// Series colours for charts on the dark backdrop. Same hues as WORLD_COLORS, but the
+// Moon gets a lavender tint — plain gray reads as "no data" in a chart. Validated
+// (lightness, chroma, colour-blind separation, contrast) against #0B0F1A.
+export const CHART_COLORS = {
+  Earth: "#3B6EA5",
+  Moon: "#9C86D2",
+  Jupiter: "#E8632D",
+};
+
 export const COLORS = {
   background: "#10192E",
+  // Space is black — no air to scatter light, and nebulae are too faint for the naked eye.
+  spaceBackground: "#000000",
   panel: "#1C2B4A",
   heading: "#1B2436",
   accent: "#E8632D",

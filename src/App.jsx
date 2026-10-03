@@ -4,13 +4,15 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { PerspectiveCamera } from "@react-three/drei";
 import { Physics, RigidBody, CuboidCollider } from "@react-three/rapier";
 import { Planet, Astronaut, TargetMarker } from "./components/Scene";
+import { StarField } from "./components/StarField";
 import { Logo } from "./components/Logo";
 import { PlanetSelector } from "./components/PlanetSelector";
 import { WorldInfoPanel } from "./components/WorldInfoPanel";
 import { EquationPanel } from "./components/EquationPanel";
 import { ChargeMeter } from "./components/ChargeMeter";
 import { ComparisonStrip } from "./components/ComparisonStrip";
-import { WORLDS, WORLD_COLORS, COLORS } from "./theme";
+import { GravityGraph } from "./components/GravityGraph";
+import { WORLDS, WORLD_COLORS, CHART_COLORS, COLORS } from "./theme";
 
 // Roughly a strong human jump. Gravity stays real per world, so heights still scale
 // exactly with 1/g (Earth ≈ 0.62 m, Moon ≈ 3.78 m, Jupiter ≈ 0.25 m) — but the Moon
@@ -24,9 +26,9 @@ const ASTRONAUT_REST_Y = 0; // world y where the astronaut's RigidBody rests (gr
 const IDLE_FOCUS_HEIGHT = 1.6; // comfortable close-up height when nothing's charging
 const CAMERA_BASE_FOV = 45; // never zoom in tighter than the original default
 const CAMERA_MAX_FOV = 95; // widen (rather than only retreat) to fit very tall bands, e.g. the Moon
-const CAMERA_MIN_DISTANCE = 4;
-const CAMERA_MAX_DISTANCE = 20;
-const CAMERA_GROUND_MARGIN = 1.4; // keeps the planet/ground anchored at the bottom of frame
+const CAMERA_MIN_DISTANCE = 8;
+const CAMERA_MAX_DISTANCE = 24;
+const CAMERA_GROUND_MARGIN = 5; // frame a bit more than half the planet (radius 4) below the ground line
 const CAMERA_PADDING = 1.15; // extra headroom above the focus height
 const CAMERA_DISTANCE_GROWTH = 0.3; // how much distance grows per meter of framed height
 const CAMERA_DAMPING = 4; // higher = snappier follow
@@ -141,6 +143,8 @@ function gameReducer(state, action) {
 export default function App() {
   const [world, setWorld] = useState("Earth");
   const [mode, setMode] = useState("learn"); // "learn" | "game"
+  const [showGraph, setShowGraph] = useState(false);
+  const closeGraph = useCallback(() => setShowGraph(false), []);
   const [jumps, setJumps] = useState(0);
   const [pressTick, setPressTick] = useState(0);
   const [releaseTick, setReleaseTick] = useState(0);
@@ -232,7 +236,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", background: COLORS.background, overflow: "hidden" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", background: COLORS.spaceBackground, overflow: "hidden" }}>
       <Logo sessionJumps={jumps} />
 
       <PlanetSelector world={world} worlds={WORLDS} activeColor={COLORS.selectorActive} onSelect={setWorld} />
@@ -259,10 +263,47 @@ export default function App() {
       </button>
 
       <WorldInfoPanel mode={mode} world={world} />
-      <EquationPanel mode={mode} lastJump={lastJump} />
+      <EquationPanel mode={mode} lastJump={lastJump} g={g} />
 
       {mode === "learn" && (
         <ComparisonStrip worlds={WORLDS} colors={WORLD_COLORS} comparisons={comparisons} currentWorld={world} />
+      )}
+      {mode === "learn" && (
+        <>
+          {showGraph && (
+            <GravityGraph
+              worlds={WORLDS}
+              colors={CHART_COLORS}
+              velocity={FIXED_VELOCITY}
+              currentWorld={world}
+              onClose={closeGraph}
+            />
+          )}
+          <button
+            onClick={(e) => {
+              setShowGraph(true);
+              e.currentTarget.blur(); // keep SPACE for jumping, not re-clicking this button
+            }}
+            aria-haspopup="dialog"
+            style={{
+              position: "absolute",
+              right: 32,
+              bottom: 24,
+              zIndex: 11,
+              padding: "10px 22px",
+              borderRadius: 22,
+              border: "none",
+              background: COLORS.selectorActive,
+              color: "white",
+              fontFamily: "system-ui, sans-serif",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            📈 Compare on a graph
+          </button>
+        </>
       )}
 
       {mode === "learn" ? (
@@ -296,13 +337,15 @@ export default function App() {
       )}
 
       <Canvas>
-        <PerspectiveCamera makeDefault position={[0, 1, 5]} fov={45} />
+        <PerspectiveCamera makeDefault position={[0, 1, 10]} fov={45} />
         <CameraRig focusHeight={focusHeight} groundY={ASTRONAUT_REST_Y} />
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 8, 5]} intensity={1.3} />
+        <StarField />
+        {/* One hard "sun" light; only a little fill since there's no atmosphere to scatter light. */}
+        <ambientLight intensity={0.25} />
+        <directionalLight position={[6, 8, 5]} intensity={2} />
 
         <Physics gravity={[0, -g, 0]} key={world}>
-          <Planet />
+          <Planet world={world} />
           <Astronaut
             mode={mode}
             g={g}

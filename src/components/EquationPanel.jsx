@@ -4,7 +4,7 @@ function fmt(n) {
   return n == null ? null : n.toFixed(2);
 }
 
-export function EquationPanel({ mode, lastJump }) {
+export function EquationPanel({ mode, lastJump, g }) {
   let heading;
   if (mode === "learn") {
     heading = lastJump ? `h = v² / 2g = ${fmt(lastJump.measuredHeight)} m` : "h = v² / 2g";
@@ -39,6 +39,14 @@ export function EquationPanel({ mode, lastJump }) {
       >
         {heading}
       </h2>
+
+      {mode === "learn" && g != null && (
+        <p style={{ marginTop: 14, fontSize: 17, lineHeight: 1.5, color: COLORS.textOnDark }}>
+          <span style={{ color: COLORS.accent, fontWeight: 700 }}>a = g = {fmt(g)} m/s² ↓</span>
+          <br />
+          Constant the whole jump — velocity drops by {fmt(g)} m/s every second.
+        </p>
+      )}
 
       {mode === "game" && lastJump && (
         <p
